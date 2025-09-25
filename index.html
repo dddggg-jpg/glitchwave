@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Glitchwave</title>
+  <style>
+    body {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      font-family: sans-serif;
+      margin-top: 30px;
+      position: relative;
+    }
+
+    .tabs {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+
+    .tab-button {
+      padding: 8px 16px;
+      border: 1px solid #ccc;
+      background: #eee;
+      cursor: pointer;
+      border-radius: 5px;
+    }
+
+    .tab-button.active {
+      background: #ddd;
+      font-weight: bold;
+    }
+
+    .tab-content {
+      display: none;
+      width: 100%;
+      max-width: 600px;
+      text-align: center;
+    }
+
+    .tab-content.active {
+      display: block;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(4, 80px);
+      grid-template-rows: repeat(4, 80px);
+      gap: 4px;
+      margin-top: 20px;
+      justify-content: center;
+    }
+
+    .tile {
+      width: 80px;
+      height: 80px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      background-color: #ddd;
+      user-select: none;
+      transition: background-color 0.2s;
+      cursor: pointer;
+      background-size: 320px 320px;
+    }
+
+    .empty {
+      background-color: #fff;
+      background-image: none !important;
+      cursor: default;
+    }
+
+    #username-section {
+      margin-bottom: 20px;
+    }
+
+    #grid, #restart {
+      display: none;
+    }
+
+    #restart {
+      margin-top: 15px;
+    }
+
+    #user-info, #score-info, #rank-info {
+      margin: 5px 0;
+      font-weight: bold;
+    }
+    
+    #top5-scores, #full-scores {
+      list-style-type: none;
+      padding-left: 0;
+      margin: 0;
+}
+  </style>
+</head>
+<body>
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.3.0/firebase-app.js";
+  import { getFirestore, doc, setDoc, getDocs, collection, query, orderBy, increment } from "https://www.gstatic.com/firebasejs/12.3.0/firebase-firestore.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyCk89IpxCczsxVAPPv_eztlpINIO_X9eWU",
+    authDomain: "puzzle-leaderboard-da168.firebaseapp.com",
+    projectId: "puzzle-leaderboard-da168",
+    storageBucket: "puzzle-leaderboard-da168.firebasestorage.app",
+    messagingSenderId: "587603275547",
+    appId: "1:587603275547:web:2fdfb7e1c298f16233adbe"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db = getFirestore(app);
+
+  window.db = db;
+  window.firestoreFns = { doc, setDoc, getDocs, collection, query, orderBy, increment };
+</script>
+
+<h2>Glitchwave</h2>
+
+<!-- 🔹 Tabs -->
+<div class="tabs">
+  <button class="tab-button active" data-tab="game">Games</button>
+  <button class="tab-button" data-tab="leaderboard-tab">Leaderboard</button>
+  <button class="tab-button" data-tab="about">About</button>
+</div>
+
+<!-- 🔹 Game Section -->
+<div id="game" class="tab-content active">
+  <div id="username-section">
+    <label for="username">Enter username:</label>
+    <input type="text" id="username" placeholder="Your name">
+    <button id="start-btn">Start Game</button>
+  </div>
+
+  <div id="user-info"></div>
+  <div id="score-info"></div>
+  <div id="rank-info"></div>
+  <div class="grid" id="grid"></div>
+  <button id="restart">Restart</button>
+  <h4>Top 5 Leaderboard</h4>
+  <ul id="top5-scores"></ul>
+</div>
+
+<!-- 🔹 Leaderboard Section -->
+<div id="leaderboard-tab" class="tab-content">
+  <h3>Full Leaderboard</h3>
+  <ul id="full-scores"></ul>
+</div>
+
+<!-- 🔹 About Section -->
+<div id="about" class="tab-content">
+  <h3>About Glitchwave</h3>
+  <p>
+    Glitchwave is a website for video games where you can play video games with your friends. It is a fun place to spend some time and hang out with your friends, and aim for a new high score. Hang out, level up, and maybe, just maybe, you'll reach a new high score.
+  </p>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+
+<script>
+  // 🔹 Tab switching logic
+  const tabButtons = document.querySelectorAll(".tab-button");
+  const tabContents = document.querySelectorAll(".tab-content");
+
+  tabButtons.forEach(button => {
+    button.addEventListener("click", () => {
+      tabButtons.forEach(btn => btn.classList.remove("active"));
+      tabContents.forEach(tab => tab.classList.remove("active"));
+
+      button.classList.add("active");
+      document.getElementById(button.dataset.tab).classList.add("active");
+
+      if (button.dataset.tab === "leaderboard-tab") {
+        loadFullLeaderboard();
+      }
+    });
+  });
+
+  // 🔹 Puzzle & leaderboard code
+  const gridEl = document.getElementById('grid');
+  const restartBtn = document.getElementById('restart');
+  const startBtn = document.getElementById('start-btn');
+  const usernameInput = document.getElementById('username');
+  const usernameSection = document.getElementById('username-section');
+
+  let username = null;
+  let tiles = [...Array(15).keys()].map(n => n + 1);
+  tiles.push(null);
+
+  let hasWon = false;
+  let shuffling = false;
+  let gameStarted = false;
+
+  const imagePool = [
+    "https://cdn.discordapp.com/attachments/513345280100270096/593723823090827265/d1990a02b89ebc1b1474aef49649fc9f.jpg?ex=68d6fba6&is=68d5aa26&hm=705bd95d8863140d4d71d75c85ad0c162fb3ec62f0c292600b9f43024122af26",
+    "https://cdn.discordapp.com/attachments/513345280100270096/542209371736768532/tumblr_pmfrw5riXx1y13oqeo1_400.png?ex=68d6c813&is=68d57693&hm=80171c27b29ba611259fbd3431877f4202acbd9798a47131336994b064874fb0",
+    "https://cdn.discordapp.com/attachments/513345280100270096/529005826430730250/ForMegaupload.png?ex=68d6de11&is=68d58c91&hm=f9cb7bf57f8afd304ad1d064f0512df8f66ee8658f0157d2dbda16b20bde15a5",
+    "https://media.discordapp.net/attachments/513345280100270096/520877751096573953/tumblr_p8ppmk9Q0m1xoyw8po2_540.png?ex=68d6f5f5&is=68d5a475&hm=fef59ecb6a7d7fdba5df39a13649ed7e6a4fcab8c1cfb170382e4db060dd0082&=&format=webp&quality=lossless",
+    "https://media.discordapp.net/attachments/513345280100270096/520051865799491593/1.png?ex=68d697ca&is=68d5464a&hm=9683947288ea362beb512305a4541c6dc7e1daf6e5ea6e00ae3349c38676f136&=&format=webp&quality=lossless",
+    "https://cdn.discordapp.com/attachments/513345280100270096/519764626528010240/9k.png?ex=68d6ddc7&is=68d58c47&hm=ceb9f0e83ad6299ae4737438a4ee2a33951d532aead56f35bd88759d632be079",
+    "https://cdn.discordapp.com/attachments/513345280100270096/517088942680440844/37399523_10156535883683454_1072111626213130240_n.jpg?ex=68d7051a&is=68d5b39a&hm=f22c107085b3d302af2798d7a7fcc6665579295bf162d9d62a7d4cd93e78becd",
+    "https://cdn.discordapp.com/attachments/513345280100270096/513363763525844992/hqdefault.jpg?ex=68d6a6c3&is=68d55543&hm=7e9792709db8df7ebb714db4ffd871ffb4fb3d0f70c666770a8cdff66c3fbd73",
+    "https://cdn.discordapp.com/attachments/513345280100270096/513345299352125440/agd3qr9lolx11.png?ex=68d69590&is=68d54410&hm=b1f246e47e8f46b7d4ed15daf91f6f9c8c247a3ec24e9912d525ee876098b97e",
+    "https://applegary.com/wp-content/uploads/2010/12/arbymitt1-2.jpg",
+"https://cdn.discordapp.com/attachments/513345280100270096/536789611133927424/Bimbo-eating-sandwich-bimbo-bread-company-23203260-116-188.jpg?ex=68d6d708&is=68d58588&hm=4588dc4b7b539d8856cb420a1b6c9f9fb32895764c2a151c33dc78effa87f091"
+  ];
+
+  let puzzleImage = imagePool[Math.floor(Math.random() * imagePool.length)];
+  let useImages = true;
+
+  function render() {
+    gridEl.innerHTML = '';
+    tiles.forEach((n, index) => {
+      const tile = document.createElement('div');
+      tile.className = 'tile' + (n === null ? ' empty' : '');
+
+      if (n !== null) {
+        if (useImages) {
+          const correctIndex = n - 1;
+          const correctX = correctIndex % 4;
+          const correctY = Math.floor(correctIndex / 4);
+          tile.style.backgroundImage = `url(${puzzleImage})`;
+          tile.style.backgroundPosition = `-${correctX * 80}px -${correctY * 80}px`;
+          tile.textContent = '';
+        } else {
+          tile.style.backgroundImage = 'none';
+          tile.textContent = n;
+        }
+
+        tile.addEventListener('click', () => {
+          const emptyIndex = tiles.indexOf(null);
+          const tileX = index % 4;
+          const tileY = Math.floor(index / 4);
+          const emptyX = emptyIndex % 4;
+          const emptyY = Math.floor(emptyIndex / 4);
+
+          if (
+            (Math.abs(tileX - emptyX) === 1 && tileY === emptyY) ||
+            (Math.abs(tileY - emptyY) === 1 && tileX === emptyX)
+          ) {
+            [tiles[index], tiles[emptyIndex]] = [tiles[emptyIndex], tiles[index]];
+            render();
+          }
+        });
+      }
+      gridEl.appendChild(tile);
+    });
+
+    if (!shuffling && gameStarted && isSolved() && !hasWon) {
+      hasWon = true;
+      celebrate();
+      awardPoint(username);
+    }
+  }
+
+  function move(dx, dy) {
+    const i = tiles.indexOf(null);
+    const x = i % 4;
+    const y = Math.floor(i / 4);
+    const nx = x + dx;
+    const ny = y + dy;
+    if (nx >= 0 && nx < 4 && ny >= 0 && ny < 4) {
+      const ni = ny * 4 + nx;
+      [tiles[i], tiles[ni]] = [tiles[ni], tiles[i]];
+      if (!shuffling) render();
+    }
+  }
+
+  function shuffle(times = 100) {
+    shuffling = true;
+    hasWon = false;
+    const directions = [[0, 1],[0, -1],[1, 0],[-1, 0]];
+    for (let i = 0; i < times; i++) {
+      const emptyIndex = tiles.indexOf(null);
+      const x = emptyIndex % 4;
+      const y = Math.floor(emptyIndex / 4);
+      const validMoves = [];
+      for (let [dx, dy] of directions) {
+        const nx = x + dx;
+        const ny = y + dy;
+        if (nx >= 0 && nx < 4 && ny >= 0 && ny < 4) validMoves.push([dx, dy]);
+      }
+      const [dx, dy] = validMoves[Math.floor(Math.random() * validMoves.length)];
+      move(dx, dy);
+    }
+    shuffling = false;
+    gameStarted = true;
+    render();
+  }
+
+  function isSolved() {
+    for (let i = 0; i < 15; i++) if (tiles[i] !== i + 1) return false;
+    return tiles[15] === null;
+  }
+
+  function celebrate() {
+    const duration = 2000, end = Date.now() + duration;
+    (function frame() {
+      confetti({ particleCount: 5, angle: 60, spread: 55, origin: { x: 0 } });
+      confetti({ particleCount: 5, angle: 120, spread: 55, origin: { x: 1 } });
+      if (Date.now() < end) requestAnimationFrame(frame);
+    })();
+  }
+
+  async function getUserScore(username) {
+    const { getDocs, collection, query, orderBy } = window.firestoreFns;
+    const q = query(collection(window.db, "leaderboard"), orderBy("score", "desc"));
+    const snapshot = await getDocs(q);
+
+    let rank = 0, score = 0;
+    let place = 0;
+    snapshot.forEach(doc => {
+      place++;
+      if (doc.id === username) {
+        score = doc.data().score;
+        rank = place;
+      }
+    });
+    return { score, rank };
+  }
+
+  async function loadTop5Leaderboard() {
+    const { getDocs, collection, query, orderBy } = window.firestoreFns;
+    const q = query(collection(window.db, "leaderboard"), orderBy("score", "desc"));
+    const snapshot = await getDocs(q);
+    const scoresEl = document.getElementById("top5-scores");
+    scoresEl.innerHTML = "";
+    let i = 0;
+    snapshot.forEach(doc => {
+      if (i < 5) {
+        const li = document.createElement("li");
+        li.textContent = `${doc.id}: ${doc.data().score}`;
+        scoresEl.appendChild(li);
+      }
+      i++;
+    });
+  }
+
+  async function refreshUserInfo() {
+    if (!username) return;
+    const { score, rank } = await getUserScore(username);
+    document.getElementById("user-info").textContent = `Logged in as: ${username}`;
+    document.getElementById("score-info").textContent = `Current Score: ${score}`;
+    document.getElementById("rank-info").textContent = `Leaderboard Rank: #${rank}`;
+  }
+
+  async function awardPoint(username) {
+    const { doc, setDoc, increment } = window.firestoreFns;
+    const userRef = doc(window.db, "leaderboard", username);
+    await setDoc(userRef, { score: increment(1) }, { merge: true });
+
+    await refreshUserInfo();
+    await loadTop5Leaderboard();
+
+    alert(`🎉 Congrats ${username}, you scored a point! Try another puzzle for more!`);
+  }
+
+  async function loadFullLeaderboard() {
+    const { getDocs, collection, query, orderBy } = window.firestoreFns;
+    const q = query(collection(window.db, "leaderboard"), orderBy("score", "desc"));
+    const snapshot = await getDocs(q);
+    const scoresEl = document.getElementById("full-scores");
+    scoresEl.innerHTML = "";
+    let place = 0;
+    snapshot.forEach(doc => {
+      place++;
+      const li = document.createElement("li");
+      li.textContent = `#${place} ${doc.id}: ${doc.data().score}`;
+      scoresEl.appendChild(li);
+    });
+  }
+
+  // 🔹 Secret sequence to toggle
+  let secretSequence = ['[', ']', '\\'], pressedKeys = [];
+  document.addEventListener('keydown', e => {
+    if (!username) return;
+    if (e.key === 'ArrowUp') move(0, 1), render();
+    else if (e.key === 'ArrowDown') move(0, -1), render();
+    else if (e.key === 'ArrowLeft') move(1, 0), render();
+    else if (e.key === 'ArrowRight') move(-1, 0), render();
+    pressedKeys.push(e.key);
+    if (pressedKeys.length > secretSequence.length) pressedKeys.shift();
+    if (JSON.stringify(pressedKeys) === JSON.stringify(secretSequence)) {
+      useImages = !useImages; render();
+    }
+  });
+
+  restartBtn.addEventListener('click', () => {
+    puzzleImage = imagePool[Math.floor(Math.random() * imagePool.length)];
+    shuffle(100);
+  });
+async function ensureUserDoc(username) {
+  const { doc, getDoc, setDoc } = window.firestoreFns;
+  const userRef = doc(window.db, "leaderboard", username);
+  const snap = await getDoc(userRef);
+  if (!snap.exists()) {
+    await setDoc(userRef, { score: 0 });
+  }
+}
+
+  startBtn.addEventListener('click', async () => {
+    const name = usernameInput.value.trim();
+    if (!name) { alert("Please enter a username!"); return; }
+    username = name;
+    usernameSection.style.display = "none";
+    gridEl.style.display = "grid";
+    restartBtn.style.display = "inline-block";
+    puzzleImage = imagePool[Math.floor(Math.random() * imagePool.length)];
+    shuffle(100);
+
+    await refreshUserInfo();
+    await loadTop5Leaderboard();
+  });
+</script>
+</body>
+</html>
+
+
